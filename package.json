@@ -14,5 +14,8 @@
     "grunt-yamllint": "latest",
     "stylelint-config-standard": "latest",
     "time-grunt": "latest"
+  },
+  "dependencies": {
+    "node-ical": "^0.11.3"
   }
 }
