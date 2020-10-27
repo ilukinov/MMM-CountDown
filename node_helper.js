@@ -1,74 +1,90 @@
-const request = require('request');
-const ical = require('node-ical');
-
-var NodeHelper = require("node_helper");
-var moment = require("moment");
-
-const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
+const NodeHelper = require("node_helper");
+const CalendarFetcher = require("./calendarfetcher.js");
+const validUrl = require("valid-url");
 
 module.exports = NodeHelper.create({
 
-  start: function() {
-    console.log("[COUNTDOWN] Starting node_helper for module: " + this.name);
+  countdownLog: function(msg){
+		prefix = "MMM-Countdown ";
+		if (this.debug){
+			console.log(prefix + msg);
+		}
+	},
 
-    this.schedule = null;
-    this.eventsArray = [];
+  start: function() {
+    console.log("Starting node_helper for module: " + this.name);
+    this.fetchers = [];
 
   },
 
+  //Override the socket Notification
   socketNotificationReceived: function(notification, payload) {
 
-    var self = this;
+    if (notification == "EVENTS_GET"){
+      this.debug = payload.debug;
+      this.countdownLog("Notification received: " +notification);
 
-    if (payload.debug == true) console.log("[COUNTDOWN] Notification received: ", notification);
-    if (payload.eventDataUrl != null) {
-      this.eventsArray = [];
-
-      if (payload.debug == true) console.log("[COUNTDOWN] Getting events from URL: ", payload.eventDataUrl);
-      
-      ical.fromURL(payload.eventDataUrl, {}, function (err, data) {
-
-        if (err) throw err;
-
-        self.schedule = data;
-        self.postProcessSchedule(payload.debug);
-        self.getNextEvents(payload);
-      });
-
+      //TODO add maxentries masnumofdays,auth to config for now hardcoiding max and setting auth to null
+      this.createFetcher(payload.eventDataUrl, payload.reloadInterval,[],payload.maximumEntries,payload.maximumNumberOfDays,payload.auth,false,payload.instanceId);
     }
   },
 
-  postProcessSchedule: function(debug) {
 
-    for (let k in this.schedule) {
-      if (this.schedule.hasOwnProperty(k)) {
-          const ev = this.schedule[k];
-          if (this.schedule[k].type == 'VEVENT') {
-            if (debug == true) console.log(`[COUNTDOWN] ${ev.summary}, ${ev.start} on the ${ev.start.getDate()} of ${months[ev.start.getMonth()]} at ${ev.start.toLocaleTimeString('en-GB')}`);
+  /**
+	 * Creates a fetcher for a new url if it doesn't exist yet.
+	 * Otherwise it reuses the existing one.
+	 *
+	 * @param {string} url The url of the calendar
+	 * @param {number} fetchInterval How often does the calendar needs to be fetched in ms
+	 * @param {string[]} excludedEvents An array of words / phrases from event titles that will be excluded from being shown.
+	 * @param {number} maximumEntries The maximum number of events fetched.
+	 * @param {number} maximumNumberOfDays The maximum number of days an event should be in the future.
+	 * @param {object} auth The object containing options for authentication against the calendar.
+	 * @param {boolean} broadcastPastEvents If true events from the past maximumNumberOfDays will be included in event broadcasts
+	 * @param {string} identifier ID of the module
+	 */
+	createFetcher: function (url, fetchInterval, excludedEvents, maximumEntries, maximumNumberOfDays, auth, broadcastPastEvents, identifier) {
+		var self = this;
 
-            this.schedule[k].eventDate = moment(this.schedule[k].start, "MMM DD HH:mm Z");
-            this.eventsArray.push({date: this.schedule[k].eventDate, event: this.schedule[k].summary});
-          }
-      }
-    }
+		if (!validUrl.isUri(url)) {
+			console.log("MMM-Countdown Invalid URL: " + url);
+			self.sendSocketNotification("INCORRECT_URL", { id: identifier, url: url });
+			return;
+		} 
 
-  },
+		var fetcher;
+		if (typeof self.fetchers[identifier + url] === "undefined") {
+			this.countdownLog("Create new calendar fetcher for url: " + url + " - Interval: " + fetchInterval);
+			fetcher = new CalendarFetcher(url, fetchInterval, excludedEvents, maximumEntries, maximumNumberOfDays, auth, broadcastPastEvents);
 
-  getNextEvents: function(payload) {
-    var now = moment(); //get now
-    
-    //find info for next events
-    var returnEvents = this.eventsArray.filter(function (obj) {
-      if (payload.debug == true) console.log(`[COUNTDOWN] ${obj.date}, ${now}`);
+			fetcher.onReceive(function (fetcher) {
+        		self.countdownLog("Retrieved Events");
+				self.sendSocketNotification("CALENDAR_EVENTS", {
+					id: identifier,
+					url: fetcher.url(),
+					events: fetcher.events()
+				});
+			});
 
-      return obj.date.isAfter(now, 'second');
-    });
+			fetcher.onError(function (fetcher, error) {
+				console.eventDataUrlerror("Calendar Error. Could not fetch calendar: ", fetcher.url(), error);
+				self.sendSocketNotification("FETCH_ERROR", {
+					id: identifier,
+					url: fetcher.url(),
+					error: error
+				});
+			});
 
-    if (payload.debug == true) console.log(`[COUNTDOWN] Events ${returnEvents}`);
+			self.fetchers[identifier + url] = fetcher;
+		} else {
+			console.log("Use existing calendar fetcher for url: " + url);
+			fetcher = self.fetchers[identifier + url];
+			fetcher.broadcastEvents();
+		}
 
-    this.sendSocketNotification('EVENTS-RESPONSE', returnEvents.sort((a, b) => a.date - b.date));
+		fetcher.startFetch();
+	}
 
-  }
+
 
 });
