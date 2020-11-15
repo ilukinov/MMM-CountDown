@@ -2,7 +2,7 @@
  *
  * MMM-CountDown
  *
- * 
+ *
  * MIT Licensed.
  *
  * Custom here your css module
@@ -14,18 +14,18 @@
   text-align: center;
 }
 
-* {
+.countDownTimer * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-h1 {
+.countDownTimer h1 {
   font-weight: normal;
   font-size:40px;
 }
 
-li {
+.countDownTimer li {
   display: inline-block;
   font-size: 20px;
   list-style-type: none;
@@ -35,7 +35,7 @@ li {
   background-color: rgba(255,255,255,.2);
 }
 
-li span {
+.countDownTimer li span {
   display: block;
   font-size: 70px;
 }
